@@ -1,4 +1,5 @@
 import { connectRealtime } from './realtime.js';
+import { createVoice } from './voice.js';
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -82,6 +83,19 @@ const els = {
   confirmOk: $('#confirm-ok'),
   confirmCancel: $('#confirm-cancel'),
   toast: $('#toast'),
+  zoomOut: $('#zoom-out'),
+  zoomIn: $('#zoom-in'),
+  zoomLevel: $('#zoom-level'),
+  voiceBtn: $('#voice-btn'),
+  voicePanel: $('#voice-panel'),
+  voiceTiles: $('#voice-tiles'),
+  voiceStatus: $('#voice-status'),
+  voiceMic: $('#voice-mic'),
+  voiceScreen: $('#voice-screen'),
+  voiceLeave: $('#voice-leave'),
+  voiceClose: $('#voice-close'),
+  voiceZoomIn: $('#voice-zoom-in'),
+  voiceZoomOut: $('#voice-zoom-out'),
 };
 
 const THEME_KEY = 'lc-theme';
@@ -115,7 +129,17 @@ const state = {
   friends: { friends: [], incoming: [], outgoing: [] },
   settingsMembers: [],
   settingsFriends: [],
+  voice: null,
+  chatZoom: 1,
+  voiceZoom: 1,
 };
+
+try {
+  const savedZoom = Number(localStorage.getItem('lc-zoom'));
+  if (Number.isFinite(savedZoom) && savedZoom >= 0.85 && savedZoom <= 1.6) state.chatZoom = savedZoom;
+} catch {
+  // 저장소를 쓸 수 없으면 기본 배율로 둔다.
+}
 
 const timeFormatter = new Intl.DateTimeFormat('ko-KR', { hour: 'numeric', minute: '2-digit' });
 const dateFormatter = new Intl.DateTimeFormat('ko-KR', {
@@ -475,6 +499,7 @@ function renderChatHeader() {
     els.leaveBtn.hidden = state.isOwner || !state.isMember;
     els.inviteBtn.hidden = !(visibility === 'public' || state.isOwner);
     els.inviteBtn.textContent = visibility === 'public' ? '링크 복사' : '초대 링크';
+    els.voiceBtn.hidden = false;
   } else {
     els.chatTitle.textContent = '글로벌 채팅';
     els.chatSub.textContent = state.realtimeReady
@@ -484,7 +509,109 @@ function renderChatHeader() {
     els.leaveBtn.hidden = true;
     els.inviteBtn.hidden = false;
     els.inviteBtn.textContent = '링크 복사';
+    els.voiceBtn.hidden = true;
   }
+}
+
+function applyChatZoom() {
+  document.documentElement.style.setProperty('--chat-zoom', String(state.chatZoom));
+  els.zoomLevel.textContent = `${Math.round(state.chatZoom * 100)}%`;
+  try {
+    localStorage.setItem('lc-zoom', String(state.chatZoom));
+  } catch {
+    // 저장 실패는 무시한다.
+  }
+}
+
+function setChatZoom(next) {
+  state.chatZoom = Math.min(1.6, Math.max(0.85, Math.round(next * 20) / 20));
+  applyChatZoom();
+}
+
+function applyVoiceZoom() {
+  els.voiceTiles.style.setProperty('--tile-zoom', String(state.voiceZoom));
+}
+
+function renderVoice() {
+  const voice = state.voice;
+  if (!voice) {
+    els.voicePanel.hidden = true;
+    els.voiceBtn.textContent = '음성';
+    return;
+  }
+
+  const snap = voice.snapshot();
+  els.voicePanel.hidden = false;
+  els.voiceBtn.textContent = snap.joined ? `음성 ${snap.count}` : '음성';
+  els.voiceStatus.textContent = snap.joined
+    ? `${snap.statusLabel} · ${snap.count}명`
+    : snap.statusLabel;
+  els.voiceMic.textContent = snap.micOn ? '마이크 끄기' : '마이크 켜기';
+  els.voiceMic.classList.toggle('is-off', !snap.micOn);
+  els.voiceScreen.textContent = snap.screenOn ? '공유 중지' : '화면 공유';
+  els.voiceScreen.disabled = !snap.canShareScreen;
+
+  const fragment = document.createDocumentFragment();
+  for (const person of snap.participants) {
+    const tile = document.createElement('div');
+    tile.className = `voice__tile${person.screen ? ' voice__tile--video' : ''}`;
+
+    if (person.videoStream) {
+      const video = document.createElement('video');
+      video.className = 'voice__video';
+      video.autoplay = true;
+      video.muted = true;
+      video.playsInline = true;
+      video.srcObject = person.videoStream;
+      tile.append(video);
+      tile.addEventListener('dblclick', () => tile.classList.toggle('voice__tile--full'));
+    } else {
+      const avatar = document.createElement('span');
+      avatar.className = 'voice__avatar';
+      avatar.textContent = String(person.nickname).slice(0, 1).toUpperCase();
+      tile.append(avatar);
+    }
+
+    const name = document.createElement('span');
+    name.className = 'voice__name';
+    name.textContent = `${person.nickname}${person.self ? ' (나)' : ''}`;
+    tile.append(name);
+
+    const flags = document.createElement('span');
+    flags.className = 'voice__flags';
+    flags.textContent = person.mic ? '🎙' : '🔇';
+    tile.append(flags);
+    fragment.append(tile);
+  }
+
+  if (!snap.participants.length) fragment.append(emptyNote('아직 아무도 없어요.'));
+  els.voiceTiles.replaceChildren(fragment);
+  applyVoiceZoom();
+}
+
+function openVoice() {
+  if (state.channel === 'global') {
+    toast('음성은 방 안에서만 쓸 수 있어요.');
+    return Promise.resolve();
+  }
+  if (!state.voice) {
+    state.voice = createVoice({
+      roomId: state.channel,
+      me: state.me,
+      onState: () => renderVoice(),
+      onNotice: (message) => toast(message),
+    });
+  }
+  renderVoice();
+  return state.voice.join().then(renderVoice);
+}
+
+async function closeVoice() {
+  const voice = state.voice;
+  if (!voice) return;
+  state.voice = null;
+  await voice.leave().catch(() => {});
+  renderVoice();
 }
 
 function renderChannels() {
@@ -1012,6 +1139,10 @@ async function openChannel(channel, channelId = null) {
   const nextChannelId = channel === 'global' ? null : channelId;
   const changed =
     channel !== state.channel || (nextChannelId ?? null) !== (state.channelId ?? null);
+
+  if (changed) closeVoice();
+  // 모바일에서 방 링크로 바로 들어와도 채팅 화면이 보이도록 한다.
+  document.body.classList.add('chat-open');
 
   if (!changed) {
     document.body.classList.add('chat-open');
@@ -1574,6 +1705,7 @@ async function enterApp() {
   els.loginView.hidden = true;
   els.appView.hidden = false;
 
+  applyChatZoom();
   await loadLobby();
 
   const params = new URLSearchParams(location.search);
@@ -1598,6 +1730,8 @@ async function enterApp() {
   }
 
   updateUrl();
+  // 방 링크로 들어온 경우 모바일에서도 채팅 화면을 바로 보여준다.
+  if (state.channel !== 'global') document.body.classList.add('chat-open');
 
   try {
     await loadRoomDetail();
@@ -1675,6 +1809,40 @@ els.loginForm.addEventListener('submit', async (event) => {
   } finally {
     els.loginSubmit.disabled = false;
   }
+});
+
+els.zoomOut.addEventListener('click', () => setChatZoom(state.chatZoom - 0.1));
+els.zoomIn.addEventListener('click', () => setChatZoom(state.chatZoom + 0.1));
+
+els.voiceBtn.addEventListener('click', () => {
+  if (state.voice?.joined) {
+    closeVoice();
+    return;
+  }
+  openVoice().catch(() => toast('음성 연결에 실패했어요.'));
+});
+
+els.voiceClose.addEventListener('click', () => closeVoice());
+els.voiceLeave.addEventListener('click', () => closeVoice());
+els.voiceMic.addEventListener('click', async () => {
+  if (!state.voice) return;
+  await state.voice.toggleMic().catch(() => {});
+  renderVoice();
+});
+els.voiceScreen.addEventListener('click', async () => {
+  if (!state.voice) return;
+  const snap = state.voice.snapshot();
+  if (snap.screenOn) await state.voice.stopScreen().catch(() => {});
+  else await state.voice.startScreen().catch(() => {});
+  renderVoice();
+});
+els.voiceZoomIn.addEventListener('click', () => {
+  state.voiceZoom = Math.min(3, Math.round((state.voiceZoom + 0.25) * 100) / 100);
+  applyVoiceZoom();
+});
+els.voiceZoomOut.addEventListener('click', () => {
+  state.voiceZoom = Math.max(1, Math.round((state.voiceZoom - 0.25) * 100) / 100);
+  applyVoiceZoom();
 });
 
 els.roomSearch.addEventListener('input', () => {
@@ -1876,6 +2044,7 @@ els.backBtn.addEventListener('click', () => {
 
 els.logoutBtn.addEventListener('click', async () => {
   state.realtime?.close();
+  closeVoice();
   try {
     await api('/api/logout', { method: 'POST' });
   } catch {

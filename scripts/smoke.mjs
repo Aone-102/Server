@@ -566,6 +566,24 @@ check(
 const strangerPositions = await positionsFor(carol.cookie, privateRoom.data.room.id);
 check('비멤버는 스크롤 위치를 볼 수 없음', strangerPositions.status === 403);
 
+const voiceTicket = await ticketFor(bob.cookie, `voice:${serverId}`);
+check('음성 티켓 발급', voiceTicket.status === 200);
+
+const strangerVoiceTicket = await ticketFor(carol.cookie, `voice:${privateRoom.data.room.id}`);
+check('비멤버는 음성 티켓을 받지 못함', strangerVoiceTicket.status === 403);
+
+const voiceSignal = await authFetch(`/api/rooms/${serverId}/voice/signal`, bob.cookie, {
+  method: 'POST',
+  body: JSON.stringify({ kind: 'mic', payload: { on: false } }),
+});
+check('음성 신호 중계', voiceSignal.status === 200);
+
+const badVoiceSignal = await authFetch(`/api/rooms/${serverId}/voice/signal`, bob.cookie, {
+  method: 'POST',
+  body: JSON.stringify({ kind: 'bogus' }),
+});
+check('알 수 없는 음성 신호 거부', badVoiceSignal.status === 400);
+
 const roomTicket = await ticketFor(bob.cookie, `room:${serverId}`);
 check('방 단위 알림 티켓 발급', roomTicket.status === 200);
 

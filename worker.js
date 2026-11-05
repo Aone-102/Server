@@ -19,6 +19,7 @@ const HISTORY_LIMIT = 60;
 const USER_ID_RE = /^[a-zA-Z0-9_.-]{3,20}$/;
 const REALTIME_ROOM_RE = /^room:([A-Za-z0-9_-]{4,24})$/;
 const REALTIME_CHANNEL_RE = /^ch:([A-Za-z0-9_-]{4,24})$/;
+const REALTIME_VOICE_RE = /^voice:([A-Za-z0-9_-]{4,24})$/;
 const CODE_RE = /^[A-Z0-9]{4,12}$/;
 const VISIBILITIES = new Set(['public', 'invite', 'private']);
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -562,9 +563,15 @@ async function issueTicket(request, env, user) {
 
   if (room !== 'global') {
     const channelMatch = REALTIME_CHANNEL_RE.exec(room);
+    const voiceMatch = REALTIME_VOICE_RE.exec(room);
     if (channelMatch) {
       const channel = await getChannel(env, channelMatch[1]);
       const target = channel ? await getRoom(env, channel.roomId) : null;
+      if (!target) return fail('방을 찾을 수 없어요.', 404);
+      const access = await canEnterRoom(env, target, user);
+      if (!access.allowed) return fail('초대가 필요한 방이에요.', 403);
+    } else if (voiceMatch) {
+      const target = await getRoom(env, voiceMatch[1]);
       if (!target) return fail('방을 찾을 수 없어요.', 404);
       const access = await canEnterRoom(env, target, user);
       if (!access.allowed) return fail('초대가 필요한 방이에요.', 403);
@@ -997,6 +1004,47 @@ async function markChannelRead(request, env, user, channelId) {
     .run();
 
   return json({ ok: true, channelId: channel.id, readAt });
+}
+
+const voiceBuckets = new Map();
+function takeVoiceToken(userId) {
+  if (voiceBuckets.size > 5000) voiceBuckets.clear();
+  const now = Date.now();
+  const bucket = voiceBuckets.get(userId) ?? { tokens: 80, updatedAt: now };
+  bucket.tokens = Math.min(80, bucket.tokens + (now - bucket.updatedAt) / 250);
+  bucket.updatedAt = now;
+  voiceBuckets.set(userId, bucket);
+  if (bucket.tokens < 1) return false;
+  bucket.tokens -= 1;
+  return true;
+}
+
+const VOICE_SIGNAL_KINDS = new Set(['offer', 'answer', 'ice', 'leave', 'mic', 'screen', 'state']);
+
+async function postVoiceSignal(request, env, user, roomId) {
+  if (!sameOrigin(request, env)) return fail('허용되지 않은 요청이에요.', 403);
+  if (!takeVoiceToken(user.id)) return fail('신호를 너무 빠르게 보내고 있어요.', 429);
+
+  const room = await getRoom(env, roomId);
+  if (!room) return fail('방을 찾을 수 없어요.', 404);
+  const access = await canEnterRoom(env, room, user);
+  if (!access.allowed) return fail('초대가 필요한 방이에요.', 403);
+
+  const body = await readJson(request);
+  const kind = String(body?.kind ?? '');
+  if (!VOICE_SIGNAL_KINDS.has(kind)) return fail('알 수 없는 신호예요.', 400);
+
+  const to = body?.to ? String(body.to).slice(0, 40) : null;
+  const payload = body?.payload && typeof body.payload === 'object' ? body.payload : null;
+  if (payload && JSON.stringify(payload).length > 60_000) return fail('신호가 너무 커요.', 400);
+
+  await publishRealtime(env, {
+    room: `voice:${room.id}`,
+    event: 'voice-signal',
+    data: { from: user.id, to, kind, payload },
+  });
+
+  return json({ ok: true });
 }
 
 async function listPositions(env, user, room) {
@@ -1575,6 +1623,12 @@ async function handleApi(request, env, url) {
       decodeSegment(memberMatch[1]),
       decodeSegment(memberMatch[2]),
     );
+  }
+
+  const voiceSignalMatch = /^\/api\/rooms\/([^/]+)\/voice\/signal$/.exec(path);
+  if (voiceSignalMatch) {
+    if (method !== 'POST') return fail('허용되지 않은 메서드예요.', 405);
+    return postVoiceSignal(request, env, user, decodeSegment(voiceSignalMatch[1]));
   }
 
   const positionsMatch = /^\/api\/rooms\/([^/]+)\/positions$/.exec(path);

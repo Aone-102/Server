@@ -34,6 +34,14 @@
 - 서로 요청이 엇갈리면 자동으로 수락됩니다.
 - 친구는 비공개방 초대 목록에 나타나고, 방장이 초대/내보내기를 할 수 있습니다.
 
+### 음성 · 화면공유
+
+- 방 안에서 `음성` 버튼을 누르면 마이크로 참여하고, 참여자 타일이 뜹니다.
+- `화면 공유`를 누르면 브라우저 화면을 공유하고, 공유 타일은 더블클릭으로 전체 화면이 됩니다.
+- 미디어는 WebRTC P2P로 흐르고, SDP/ICE 교환만 서버(`voice:<방ID>`)로 중계합니다.
+- 공유 화면은 `+`/`−` 버튼으로 1~3배 확대할 수 있고, 채팅 글자도 헤더의 `A−`/`A+`로 85~160% 조절됩니다(설정 유지).
+- 마이크·화면 권한이 없으면 해당 기능만 꺼지고 나머지는 그대로 동작합니다.
+
 ### 테마
 
 - 기본은 **밝은(흰색) 화면**이고, 오른쪽 위 버튼으로 다크 모드로 전환합니다.
@@ -118,7 +126,8 @@ sites_deploy       production deploy.manifest.json
 | `POST` | `/api/friends/requests` | `{ userId }` → 친구 요청 |
 | `POST` | `/api/friends/requests/:id/respond` | `{ action: 'accept' \| 'decline' }` |
 | `DELETE` | `/api/friends/:userId` | 친구 삭제 |
-| `POST` | `/api/realtime/ticket` | `{ room }` → 실시간 접속 티켓 (방 접근 권한 확인) |
+| `POST` | `/api/rooms/:id/voice/signal` | `{ kind, to, payload }` → WebRTC 시그널(SDP/ICE) 중계 |
+| `POST` | `/api/realtime/ticket` | `{ room }` → 실시간 접속 티켓 (방 접근 권한 확인, `voice:<방ID>` 포함) |
 | `GET` | `/healthz` | 헬스 체크 |
 
 ## 실시간 동작

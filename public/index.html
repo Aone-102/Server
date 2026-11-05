@@ -180,6 +180,12 @@
           </div>
           <button id="settings-btn" class="btn btn--ghost" type="button" hidden>방 설정</button>
           <button id="leave-btn" class="btn btn--ghost" type="button" hidden>나가기</button>
+          <div class="zoom" role="group" aria-label="글자 크기">
+            <button id="zoom-out" class="btn btn--ghost btn--icon btn--xs" type="button" aria-label="글자 작게">A−</button>
+            <span id="zoom-level" class="zoom__level">100%</span>
+            <button id="zoom-in" class="btn btn--ghost btn--icon btn--xs" type="button" aria-label="글자 크게">A+</button>
+          </div>
+          <button id="voice-btn" class="btn btn--ghost" type="button" hidden>음성</button>
           <button id="invite-btn" class="btn btn--ghost" type="button">링크 복사</button>
         </header>
 
@@ -198,6 +204,27 @@
         </form>
       </main>
     </div>
+
+    <!-- 음성 · 화면공유 -->
+    <section id="voice-panel" class="voice" aria-label="음성 채널" hidden>
+      <header class="voice__head">
+        <div class="voice__heading">
+          <strong>음성 채널</strong>
+          <span id="voice-status" class="voice__status">연결 중…</span>
+        </div>
+        <button id="voice-close" class="icon-btn" type="button" aria-label="음성 닫기">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+        </button>
+      </header>
+      <div id="voice-tiles" class="voice__tiles"></div>
+      <div class="voice__controls">
+        <button id="voice-mic" class="btn btn--ghost" type="button">마이크 켜기</button>
+        <button id="voice-screen" class="btn btn--ghost" type="button">화면 공유</button>
+        <button id="voice-zoom-out" class="btn btn--ghost btn--icon" type="button" aria-label="공유 화면 축소">−</button>
+        <button id="voice-zoom-in" class="btn btn--ghost btn--icon" type="button" aria-label="공유 화면 확대">+</button>
+        <button id="voice-leave" class="btn btn--danger" type="button">나가기</button>
+      </div>
+    </section>
 
     <!-- 방 만들기 -->
     <dialog id="create-room-dialog" class="dialog">
