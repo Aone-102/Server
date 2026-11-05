@@ -1445,6 +1445,18 @@ fieldset.field {
   transition: transform 0.15s ease;
 }
 
+.voice__video[hidden] {
+  display: none;
+}
+
+.voice__avatar[hidden] {
+  display: none;
+}
+
+.voice__audio {
+  display: none;
+}
+
 .voice__avatar {
   display: grid;
   place-items: center;

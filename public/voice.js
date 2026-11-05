@@ -29,10 +29,48 @@ export function createVoice({ roomId, me, onState = () => {}, onNotice = () => {
   let screenStream = null;
   let micOn = false;
   let screenOn = false;
+  let screenKind = null;
 
   const noop = () => {};
 
-  const isOfferer = (peerId) => selfId < peerId;
+  // 협상 전에도 m-line이 sendrecv가 되도록 무음/검정 트랙을 먼저 붙여 둔다.
+  // 실제 마이크·화면은 replaceTrack으로 갈아끼우므로 재협상이 필요 없다.
+  let placeholderVideo = null;
+  let placeholderAudio = null;
+  let placeholderOsc = null;
+
+  function placeholderVideoTrack() {
+    if (!placeholderVideo) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 2;
+      canvas.height = 2;
+      canvas.getContext('2d').fillRect(0, 0, 2, 2);
+      placeholderVideo = canvas.captureStream(1);
+    }
+    return placeholderVideo.getVideoTracks()[0] ?? null;
+  }
+
+  function placeholderAudioTrack() {
+    if (placeholderAudio) return placeholderAudio.getAudioTracks()[0] ?? null;
+    try {
+      const ctx = new AudioContext();
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      const dest = ctx.createMediaStreamDestination();
+      placeholderOsc = ctx.createOscillator();
+      placeholderOsc.connect(gain);
+      gain.connect(dest);
+      placeholderOsc.start();
+      ctx.resume().catch(noop);
+      placeholderAudio = dest.stream;
+    } catch {
+      placeholderAudio = null;
+    }
+    return placeholderAudio?.getAudioTracks()[0] ?? null;
+  }
+
+  // id가 숫자/문자열로 섞여도 비교가 NaN이 되지 않게 문자열로 맞춘다.
+  const isOfferer = (peerId) => String(selfId) < String(peerId);
 
   function snapshot() {
     const people = [
@@ -42,17 +80,23 @@ export function createVoice({ roomId, me, onState = () => {}, onNotice = () => {
         self: true,
         mic: micOn,
         screen: screenOn,
+        screenKind,
         videoStream: screenOn && screenStream ? screenStream : null,
+        audioStream: null,
       },
     ];
     for (const [peerId, peer] of peers) {
+      const info = presence.get(peerId) ?? {};
+      const sharing = info.screen === true;
       people.push({
         id: peerId,
-        nickname: presence.get(peerId)?.nickname || peerId,
+        nickname: info.nickname || peerId,
         self: false,
-        mic: presence.get(peerId)?.mic !== false,
-        screen: Boolean(peer.stream.getVideoTracks().length),
-        videoStream: peer.stream.getVideoTracks().length ? peer.stream : null,
+        mic: info.mic !== false,
+        screen: sharing,
+        screenKind: 'display',
+        videoStream: sharing ? peer.stream : null,
+        audioStream: peer.stream.getAudioTracks().length ? peer.stream : null,
       });
     }
     return {
@@ -62,7 +106,9 @@ export function createVoice({ roomId, me, onState = () => {}, onNotice = () => {
       screenOn,
       count: people.length,
       participants: people,
-      canShareScreen: Boolean(navigator.mediaDevices?.getDisplayMedia),
+      canShareScreen: Boolean(
+        navigator.mediaDevices?.getDisplayMedia || navigator.mediaDevices?.getUserMedia,
+      ),
     };
   }
 
@@ -95,13 +141,6 @@ export function createVoice({ roomId, me, onState = () => {}, onNotice = () => {
     const stream = new MediaStream();
     const peer = { id: peerId, pc, stream, pending: [], makingOffer: false };
 
-    const audioTx = pc.addTransceiver('audio', { direction: 'sendrecv' });
-    const videoTx = pc.addTransceiver('video', { direction: 'sendrecv' });
-    peer.audioSender = audioTx.sender;
-    peer.videoSender = videoTx.sender;
-    if (micStream?.getAudioTracks()[0]) peer.audioSender.replaceTrack(micStream.getAudioTracks()[0]).catch(noop);
-    if (screenStream?.getVideoTracks()[0]) peer.videoSender.replaceTrack(screenStream.getVideoTracks()[0]).catch(noop);
-
     pc.onicecandidate = (event) => {
       if (event.candidate) signal('ice', peerId, { candidate: event.candidate.toJSON() });
     };
@@ -123,6 +162,16 @@ export function createVoice({ roomId, me, onState = () => {}, onNotice = () => {
     return peer;
   }
 
+  // 로컬 트랙을 m-line에 붙인다. offerer는 offer 전에, answerer는 remote offer를
+  // 적용한 뒤 호출해야 트랜시버가 중복 생성되지 않고 sendrecv로 협상된다.
+  function attachLocalMedia(peer) {
+    peer.senders = peer.senders ?? {};
+    const audio = micStream?.getAudioTracks()[0] ?? placeholderAudioTrack();
+    const video = screenStream?.getVideoTracks()[0] ?? placeholderVideoTrack();
+    if (audio && !peer.senders.audio) peer.senders.audio = peer.pc.addTrack(audio);
+    if (video && !peer.senders.video) peer.senders.video = peer.pc.addTrack(video);
+  }
+
   async function flushCandidates(peer) {
     for (const candidate of peer.pending.splice(0)) {
       await peer.pc.addIceCandidate(candidate).catch(noop);
@@ -134,13 +183,24 @@ export function createVoice({ roomId, me, onState = () => {}, onNotice = () => {
     if (peer.makingOffer || peer.pc.signalingState !== 'stable') return;
     peer.makingOffer = true;
     try {
+      attachLocalMedia(peer);
       const offer = await peer.pc.createOffer();
       await peer.pc.setLocalDescription(offer);
       await signal('offer', peerId, { sdp: peer.pc.localDescription.toJSON() });
-    } catch {
-      // 다음 presence 갱신에서 다시 시도한다.
+    } catch (error) {
+      console.warn('[voice] offer failed', String(error));
     } finally {
       peer.makingOffer = false;
+    }
+  }
+
+  // 공유 시작/중지·마이크 지연 연결처럼 송신 트랙 구성이 바뀔 때는
+  // 피어 연결을 새로 만들어(트랙 포함) 협상을 다시 한다.
+  async function restartPeers() {
+    for (const peerId of [...peers.keys()]) {
+      dropPeer(peerId);
+      if (isOfferer(peerId)) await offerTo(peerId);
+      else await signal('renegotiate', peerId);
     }
   }
 
@@ -166,13 +226,20 @@ export function createVoice({ roomId, me, onState = () => {}, onNotice = () => {
 
     if (kind === 'offer') {
       const peer = ensurePeer(peerId);
+      // 양쪽이 동시에 offer를 만든 경우(glare): offerer가 아닌 쪽이 되돌린다.
+      if (peer.makingOffer || peer.pc.signalingState !== 'stable') {
+        if (isOfferer(peerId)) return;
+        await peer.pc.setLocalDescription({ type: 'rollback' }).catch(noop);
+      }
       try {
         await peer.pc.setRemoteDescription(payload.sdp);
         await flushCandidates(peer);
+        attachLocalMedia(peer);
         const answer = await peer.pc.createAnswer();
         await peer.pc.setLocalDescription(answer);
         await signal('answer', peerId, { sdp: peer.pc.localDescription.toJSON() });
-      } catch {
+      } catch (error) {
+        console.warn('[voice] answer failed', String(error));
         dropPeer(peerId);
       }
       return;
@@ -184,7 +251,8 @@ export function createVoice({ roomId, me, onState = () => {}, onNotice = () => {
       try {
         await peer.pc.setRemoteDescription(payload.sdp);
         await flushCandidates(peer);
-      } catch {
+      } catch (error) {
+        console.warn('[voice] set answer failed', String(error));
         dropPeer(peerId);
       }
       return;
@@ -206,6 +274,12 @@ export function createVoice({ roomId, me, onState = () => {}, onNotice = () => {
       return;
     }
 
+    if (kind === 'renegotiate') {
+      dropPeer(peerId);
+      if (isOfferer(peerId)) offerTo(peerId).catch(noop);
+      return;
+    }
+
     if (kind === 'mic' || kind === 'screen') {
       const person = presence.get(peerId) ?? { nickname: peerId, mic: true, screen: false };
       person[kind] = payload.on !== false;
@@ -223,9 +297,7 @@ export function createVoice({ roomId, me, onState = () => {}, onNotice = () => {
       });
       for (const track of micStream.getAudioTracks()) track.enabled = true;
       micOn = true;
-      for (const peer of peers.values()) {
-        await peer.audioSender.replaceTrack(micStream.getAudioTracks()[0]).catch(noop);
-      }
+      restartPeers().catch(noop);
       return true;
     } catch {
       micOn = false;
@@ -241,7 +313,15 @@ export function createVoice({ roomId, me, onState = () => {}, onNotice = () => {
     status = 'connecting';
     emit();
 
-    await acquireMic();
+    // 마이크 권한 응답을 기다리지 않고 먼저 연결한다. 권한이 없어도 서로 보이고,
+    // 허용되면 트랙만 나중에 붙는다.
+    acquireMic()
+      .then(() => {
+        if (closed) return;
+        sendPresence();
+        emit();
+      })
+      .catch(noop);
 
     try {
       realtime = connectRealtime({
@@ -276,7 +356,19 @@ export function createVoice({ roomId, me, onState = () => {}, onNotice = () => {
                 mic: member.data?.mic !== false,
                 screen: member.data?.screen === true,
               });
-              if (!before && isOfferer(member.userId)) offerTo(member.userId).catch(noop);
+              if (!before) {
+                if (isOfferer(member.userId)) {
+                  offerTo(member.userId).catch(noop);
+                } else {
+                  // offerer 판정이 어긋나도 연결이 멈추지 않도록 지연 offer를 건다.
+                  setTimeout(() => {
+                    const peer = peers.get(member.userId);
+                    if (!peer || (!peer.pc.remoteDescription && !peer.makingOffer)) {
+                      offerTo(member.userId).catch(noop);
+                    }
+                  }, 2500);
+                }
+              }
             }
             for (const peerId of [...peers.keys()]) {
               if (!seen.has(peerId)) dropPeer(peerId);
@@ -311,29 +403,47 @@ export function createVoice({ roomId, me, onState = () => {}, onNotice = () => {
 
   async function startScreen() {
     if (screenOn) return;
-    if (!navigator.mediaDevices?.getDisplayMedia) {
-      onNotice('이 브라우저에서는 화면 공유를 지원하지 않아요.');
-      return;
-    }
-    try {
-      screenStream = await navigator.mediaDevices.getDisplayMedia({
-        video: { frameRate: 15 },
-        audio: false,
-      });
-    } catch {
-      onNotice('화면 공유가 취소되었어요.');
+
+    let nextStream = null;
+    let kind = 'display';
+
+    if (navigator.mediaDevices?.getDisplayMedia) {
+      try {
+        nextStream = await navigator.mediaDevices.getDisplayMedia({
+          video: { frameRate: 15 },
+          audio: false,
+        });
+      } catch {
+        onNotice('화면 공유가 취소되었어요.');
+        return;
+      }
+    } else if (navigator.mediaDevices?.getUserMedia) {
+      // 휴대폰 브라우저에는 화면 캡처 API가 없어 카메라로 대신 공유한다.
+      try {
+        nextStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment' },
+          audio: false,
+        });
+        kind = 'camera';
+        onNotice('휴대폰에서는 화면 대신 카메라를 공유해요.');
+      } catch {
+        onNotice('공유를 시작할 수 없어요. 브라우저 권한을 확인해 주세요.');
+        return;
+      }
+    } else {
+      onNotice('이 브라우저에서는 공유를 지원하지 않아요.');
       return;
     }
 
+    screenStream = nextStream;
+    screenKind = kind;
     const track = screenStream.getVideoTracks()[0];
     track.onended = () => {
       stopScreen().catch(noop);
     };
     screenOn = true;
-    for (const peer of peers.values()) {
-      await peer.videoSender.replaceTrack(track).catch(noop);
-    }
     sendPresence();
+    await restartPeers();
     signal('screen', null, { on: true });
     emit();
   }
@@ -343,9 +453,7 @@ export function createVoice({ roomId, me, onState = () => {}, onNotice = () => {
     screenOn = false;
     for (const track of screenStream?.getTracks() ?? []) track.stop();
     screenStream = null;
-    for (const peer of peers.values()) {
-      await peer.videoSender.replaceTrack(null).catch(noop);
-    }
+    screenKind = null;
     sendPresence();
     signal('screen', null, { on: false });
     emit();
@@ -366,6 +474,7 @@ export function createVoice({ roomId, me, onState = () => {}, onNotice = () => {
     status = 'idle';
     micOn = false;
     screenOn = false;
+    screenKind = null;
     emit();
   }
 

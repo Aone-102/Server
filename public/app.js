@@ -130,6 +130,7 @@ const state = {
   settingsMembers: [],
   settingsFriends: [],
   voice: null,
+  voiceTiles: new Map(),
   chatZoom: 1,
   voiceZoom: 1,
 };
@@ -532,11 +533,43 @@ function applyVoiceZoom() {
   els.voiceTiles.style.setProperty('--tile-zoom', String(state.voiceZoom));
 }
 
+function createVoiceTile() {
+  const tile = document.createElement('div');
+  tile.className = 'voice__tile';
+
+  const avatar = document.createElement('span');
+  avatar.className = 'voice__avatar';
+
+  const video = document.createElement('video');
+  video.className = 'voice__video';
+  video.autoplay = true;
+  video.muted = true;
+  video.playsInline = true;
+  video.setAttribute('playsinline', '');
+  video.setAttribute('webkit-playsinline', '');
+  video.hidden = true;
+
+  const audio = document.createElement('audio');
+  audio.autoplay = true;
+  audio.className = 'voice__audio';
+
+  const name = document.createElement('span');
+  name.className = 'voice__name';
+
+  const flags = document.createElement('span');
+  flags.className = 'voice__flags';
+
+  tile.append(avatar, video, audio, name, flags);
+  tile.addEventListener('dblclick', () => tile.classList.toggle('voice__tile--full'));
+  return { tile, video, audio, avatar, name, flags };
+}
+
 function renderVoice() {
   const voice = state.voice;
   if (!voice) {
     els.voicePanel.hidden = true;
     els.voiceBtn.textContent = '음성';
+    clearVoiceTiles();
     return;
   }
 
@@ -548,44 +581,55 @@ function renderVoice() {
     : snap.statusLabel;
   els.voiceMic.textContent = snap.micOn ? '마이크 끄기' : '마이크 켜기';
   els.voiceMic.classList.toggle('is-off', !snap.micOn);
-  els.voiceScreen.textContent = snap.screenOn ? '공유 중지' : '화면 공유';
+  els.voiceScreen.textContent = snap.screenOn
+    ? snap.screenKind === 'camera'
+      ? '카메라 중지'
+      : '공유 중지'
+    : snap.canShareScreen
+      ? '화면 공유'
+      : '공유 불가';
   els.voiceScreen.disabled = !snap.canShareScreen;
 
-  const fragment = document.createDocumentFragment();
+  const seen = new Set();
   for (const person of snap.participants) {
-    const tile = document.createElement('div');
-    tile.className = `voice__tile${person.screen ? ' voice__tile--video' : ''}`;
-
-    if (person.videoStream) {
-      const video = document.createElement('video');
-      video.className = 'voice__video';
-      video.autoplay = true;
-      video.muted = true;
-      video.playsInline = true;
-      video.srcObject = person.videoStream;
-      tile.append(video);
-      tile.addEventListener('dblclick', () => tile.classList.toggle('voice__tile--full'));
-    } else {
-      const avatar = document.createElement('span');
-      avatar.className = 'voice__avatar';
-      avatar.textContent = String(person.nickname).slice(0, 1).toUpperCase();
-      tile.append(avatar);
+    seen.add(person.id);
+    let entry = state.voiceTiles.get(person.id);
+    if (!entry) {
+      entry = createVoiceTile();
+      state.voiceTiles.set(person.id, entry);
     }
 
-    const name = document.createElement('span');
-    name.className = 'voice__name';
+    const { tile, video, audio, avatar, name, flags } = entry;
     name.textContent = `${person.nickname}${person.self ? ' (나)' : ''}`;
-    tile.append(name);
-
-    const flags = document.createElement('span');
-    flags.className = 'voice__flags';
     flags.textContent = person.mic ? '🎙' : '🔇';
-    tile.append(flags);
-    fragment.append(tile);
+    tile.classList.toggle('voice__tile--video', Boolean(person.videoStream));
+    avatar.textContent = String(person.nickname).slice(0, 1).toUpperCase();
+    avatar.hidden = Boolean(person.videoStream);
+    video.hidden = !person.videoStream;
+
+    if (person.videoStream) {
+      if (video.srcObject !== person.videoStream) video.srcObject = person.videoStream;
+      video.play().catch(() => {});
+    } else if (video.srcObject) {
+      video.srcObject = null;
+    }
+
+    if (person.audioStream) {
+      if (audio.srcObject !== person.audioStream) audio.srcObject = person.audioStream;
+      audio.play().catch(() => {});
+    }
+
+    if (!tile.isConnected) els.voiceTiles.append(tile);
   }
 
-  if (!snap.participants.length) fragment.append(emptyNote('아직 아무도 없어요.'));
-  els.voiceTiles.replaceChildren(fragment);
+  for (const [id, entry] of state.voiceTiles) {
+    if (seen.has(id)) continue;
+    entry.tile.remove();
+    state.voiceTiles.delete(id);
+  }
+
+  els.voiceTiles.querySelector('.messages__empty')?.remove();
+  if (!snap.participants.length) els.voiceTiles.append(emptyNote('아직 아무도 없어요.'));
   applyVoiceZoom();
 }
 
@@ -611,7 +655,13 @@ async function closeVoice() {
   if (!voice) return;
   state.voice = null;
   await voice.leave().catch(() => {});
+  clearVoiceTiles();
   renderVoice();
+}
+
+function clearVoiceTiles() {
+  for (const entry of state.voiceTiles.values()) entry.tile.remove();
+  state.voiceTiles.clear();
 }
 
 function renderChannels() {

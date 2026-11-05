@@ -1019,7 +1019,16 @@ function takeVoiceToken(userId) {
   return true;
 }
 
-const VOICE_SIGNAL_KINDS = new Set(['offer', 'answer', 'ice', 'leave', 'mic', 'screen', 'state']);
+const VOICE_SIGNAL_KINDS = new Set([
+  'offer',
+  'answer',
+  'ice',
+  'leave',
+  'mic',
+  'screen',
+  'state',
+  'renegotiate',
+]);
 
 async function postVoiceSignal(request, env, user, roomId) {
   if (!sameOrigin(request, env)) return fail('허용되지 않은 요청이에요.', 403);
