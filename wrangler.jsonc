@@ -1,0 +1,29 @@
+{
+  "name": "linkchat",
+  "main": "worker.js",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "none"
+  },
+  "vars": {
+    "APP_ORIGIN": "http://127.0.0.1:3000"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "linkchat-local",
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "REALTIME",
+        "class_name": "FreebuffRealtime",
+        "script_name": "freebuff-sites-realtime-local"
+      }
+    ]
+  }
+}

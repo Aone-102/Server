@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>링크챗 — 링크 하나로 들어오는 오픈 채팅</title>
+    <meta
+      name="description"
+      content="초대 코드 없이 링크 하나로 누구나 들어와서 방을 만들고 대화하는 오픈 채팅."
+    />
+    <script>
+      (function () {
+        try {
+          var saved = localStorage.getItem('lc-theme');
+          document.documentElement.dataset.theme = saved === 'dark' ? 'dark' : 'light';
+        } catch (error) {
+          document.documentElement.dataset.theme = 'light';
+        }
+      })();
+    </script>
+    <link rel="stylesheet" href="/styles.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%236c5cff'/%3E%3Cpath d='M18 24a8 8 0 0 1 8-8h12a8 8 0 0 1 8 8v8a8 8 0 0 1-8 8h-7l-8 8v-8.4A8 8 0 0 1 18 32z' fill='white'/%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="테마 전환" title="밝게/어둡게">
+      <svg class="theme-toggle__sun" viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2" />
+        <path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6L17 7M7 17l-1.4 1.4" />
+      </svg>
+      <svg class="theme-toggle__moon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M20 14.5A8.2 8.2 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z" />
+      </svg>
+      <span class="sr-only">테마 전환</span>
+    </button>
+
+    <!-- 1단계: 입장 (아이디 + 닉네임) -->
+    <section id="login-view" class="login">
+      <div class="login__glow" aria-hidden="true"></div>
+
+      <div class="login__card">
+        <div class="brand">
+          <span class="brand__mark" aria-hidden="true">L</span>
+          <span class="brand__name">링크챗</span>
+        </div>
+
+        <h1 class="login__title">링크 하나로<br />바로 대화하기</h1>
+        <p class="login__lead">
+          초대 코드도, 가입 절차도 없어요.<br />
+          아이디와 닉네임만 정하면 바로 들어옵니다.
+        </p>
+
+        <form id="login-form" class="login__form" novalidate>
+          <label class="field">
+            <span class="field__label">아이디</span>
+            <input
+              id="login-id"
+              name="userId"
+              type="text"
+              inputmode="latin"
+              autocomplete="username"
+              autocapitalize="none"
+              spellcheck="false"
+              maxlength="20"
+              placeholder="예: minji_01"
+              required
+            />
+            <span class="field__hint">영문·숫자·_ . - 3~20자</span>
+          </label>
+
+          <label class="field">
+            <span class="field__label">닉네임</span>
+            <input
+              id="login-nickname"
+              name="nickname"
+              type="text"
+              autocomplete="nickname"
+              maxlength="16"
+              placeholder="예: 민지"
+              required
+            />
+            <span class="field__hint">채팅에 표시되는 이름 (1~16자)</span>
+          </label>
+
+          <button id="login-submit" class="btn btn--primary btn--block" type="submit">
+            입장하기
+          </button>
+          <p id="login-error" class="form-error" role="alert"></p>
+        </form>
+
+        <p class="login__foot">
+          같은 아이디로 다시 들어오면 이전 대화에 그대로 이어집니다.
+        </p>
+      </div>
+    </section>
+
+    <!-- 2단계: 로비 + 채팅 -->
+    <div id="app-view" class="app" hidden>
+      <aside class="sidebar">
+        <header class="sidebar__head">
+          <div class="brand brand--sm">
+            <span class="brand__mark" aria-hidden="true">L</span>
+            <span class="brand__name">링크챗</span>
+          </div>
+
+          <div class="me">
+            <span id="me-avatar" class="avatar" aria-hidden="true">?</span>
+            <div class="me__text">
+              <strong id="me-nickname">—</strong>
+              <span id="me-id" class="me__id">@—</span>
+            </div>
+          </div>
+        </header>
+
+        <div class="sidebar__actions">
+          <div class="search">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" />
+              <path d="m20 20-3.5-3.5" />
+            </svg>
+            <input
+              id="room-search"
+              type="search"
+              placeholder="방 찾기"
+              autocomplete="off"
+              aria-label="방 찾기"
+            />
+          </div>
+          <button id="create-room-btn" class="btn btn--ghost btn--icon" type="button" title="새 방 만들기">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            <span class="sr-only">새 방 만들기</span>
+          </button>
+        </div>
+
+        <div class="sidebar__actions sidebar__actions--secondary">
+          <button id="join-code-btn" class="btn btn--ghost" type="button">코드로 입장</button>
+          <button id="friends-btn" class="btn btn--ghost" type="button">
+            친구 <span id="friend-badge" class="badge" hidden>0</span>
+          </button>
+        </div>
+
+        <nav id="room-list" class="room-list" aria-label="서버 목록"></nav>
+
+        <nav id="channel-section" class="channels" aria-label="텍스트 채널" hidden>
+          <div class="channels__head">
+            <span class="channels__title">텍스트 채널</span>
+            <button
+              id="create-channel-btn"
+              class="btn btn--ghost btn--icon btn--xs"
+              type="button"
+              title="채널 추가"
+              hidden
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+              <span class="sr-only">채널 추가</span>
+            </button>
+          </div>
+          <div id="channel-list" class="channel-list"></div>
+        </nav>
+
+        <footer class="sidebar__foot">
+          <span class="status"><i class="status__dot" aria-hidden="true"></i>참여 중 <b id="online-count">—</b>명</span>
+          <button id="logout-btn" class="link-btn" type="button">로그아웃</button>
+        </footer>
+      </aside>
+
+      <main class="chat">
+        <header class="chat__head">
+          <button id="back-btn" class="icon-btn" type="button" title="목록으로">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
+            <span class="sr-only">목록으로</span>
+          </button>
+          <div class="chat__title">
+            <h2 id="chat-title">글로벌 채팅</h2>
+            <p id="chat-sub">—</p>
+          </div>
+          <button id="settings-btn" class="btn btn--ghost" type="button" hidden>방 설정</button>
+          <button id="leave-btn" class="btn btn--ghost" type="button" hidden>나가기</button>
+          <button id="invite-btn" class="btn btn--ghost" type="button">링크 복사</button>
+        </header>
+
+        <div id="messages" class="messages" role="log" aria-live="polite"></div>
+
+        <form id="composer" class="composer">
+          <input
+            id="message-input"
+            type="text"
+            maxlength="1000"
+            autocomplete="off"
+            placeholder="메시지를 입력하세요"
+            aria-label="메시지 입력"
+          />
+          <button class="btn btn--primary" type="submit">보내기</button>
+        </form>
+      </main>
+    </div>
+
+    <!-- 방 만들기 -->
+    <dialog id="create-room-dialog" class="dialog">
+      <form id="create-room-form" class="dialog__form" novalidate>
+        <h3>새 방 만들기</h3>
+        <p class="dialog__lead">방을 만들면 바로 코드와 링크가 생겨요.</p>
+
+        <label class="field">
+          <span class="field__label">방 이름</span>
+          <input id="room-name" type="text" maxlength="30" placeholder="예: 새벽 코딩방" required />
+        </label>
+
+        <label class="field">
+          <span class="field__label">소개 (선택)</span>
+          <input id="room-desc" type="text" maxlength="80" placeholder="예: 잡담 + 코드 리뷰" />
+        </label>
+
+        <fieldset class="field">
+          <legend>공개 범위</legend>
+          <label class="choice">
+            <input type="radio" name="visibility" value="public" checked />
+            <span><b>공개방</b><small>로비에 보이고 누구나 입장할 수 있어요</small></span>
+          </label>
+          <label class="choice">
+            <input type="radio" name="visibility" value="invite" />
+            <span><b>친구 초대방</b><small>로비에 숨김 · 방 코드를 받은 사람만 입장</small></span>
+          </label>
+          <label class="choice">
+            <input type="radio" name="visibility" value="private" />
+            <span><b>비공개방</b><small>로비에 숨김 · 방장이 친구로 초대한 사람만 입장</small></span>
+          </label>
+        </fieldset>
+
+        <p id="create-room-error" class="form-error" role="alert"></p>
+
+        <div class="dialog__actions">
+          <button id="cancel-room-btn" class="btn btn--ghost" type="button">취소</button>
+          <button class="btn btn--primary" type="submit">만들기</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- 방 설정 (방장 전용) -->
+    <dialog id="settings-dialog" class="dialog dialog--wide">
+      <form id="settings-form" class="dialog__form" novalidate>
+        <h3>방 설정</h3>
+        <p class="dialog__lead">방장만 공개 범위와 초대를 관리할 수 있어요.</p>
+
+        <label class="field">
+          <span class="field__label">방 이름</span>
+          <input id="settings-name" type="text" maxlength="30" required />
+        </label>
+
+        <label class="field">
+          <span class="field__label">소개</span>
+          <input id="settings-desc" type="text" maxlength="80" placeholder="방 소개 (선택)" />
+        </label>
+
+        <fieldset class="field">
+          <legend>공개 범위</legend>
+          <label class="choice">
+            <input type="radio" name="settings-visibility" value="public" />
+            <span><b>공개방</b><small>로비에 보이고 누구나 입장</small></span>
+          </label>
+          <label class="choice">
+            <input type="radio" name="settings-visibility" value="invite" />
+            <span><b>친구 초대방</b><small>코드를 받은 사람만 입장</small></span>
+          </label>
+          <label class="choice">
+            <input type="radio" name="settings-visibility" value="private" />
+            <span><b>비공개방</b><small>친구로 초대한 사람만 입장</small></span>
+          </label>
+        </fieldset>
+
+        <div class="code-box">
+          <div>
+            <span class="code-box__label">방 코드</span>
+            <code id="room-code">------</code>
+          </div>
+          <button id="copy-code-btn" class="btn btn--ghost" type="button">복사</button>
+        </div>
+        <p class="field__hint">
+          초대 링크나 방 코드로 입장할 수 있어요. 비공개방은 아래에서 친구를 초대해야 합니다.
+        </p>
+
+        <section class="settings-section">
+          <h4>친구 초대 <span id="invite-friend-count"></span></h4>
+          <div id="invite-friend-list" class="settings-list"></div>
+        </section>
+
+        <section class="settings-section">
+          <h4>참여자 <span id="member-count"></span></h4>
+          <div id="member-list" class="settings-list"></div>
+        </section>
+
+        <section class="settings-section">
+          <h4>삭제 기록 <span id="moderation-count"></span></h4>
+          <p class="field__hint">방장과 관리자가 지운 메시지 기록이에요. 최근 50개까지 보여요.</p>
+          <div id="moderation-list" class="settings-list"></div>
+        </section>
+
+        <section class="settings-section settings-section--danger">
+          <h4>방 삭제</h4>
+          <p class="field__hint">방과 대화가 모두 삭제되고 되돌릴 수 없어요.</p>
+          <button id="delete-room-btn" class="btn btn--danger" type="button">방 삭제</button>
+        </section>
+
+        <p id="settings-error" class="form-error" role="alert"></p>
+
+        <div class="dialog__actions">
+          <button id="close-settings-btn" class="btn btn--ghost" type="button">닫기</button>
+          <button class="btn btn--primary" type="submit">저장</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- 친구 -->
+    <dialog id="friends-dialog" class="dialog">
+      <div class="dialog__form">
+        <h3>친구</h3>
+        <form id="add-friend-form" class="inline-form" novalidate>
+          <input id="friend-id" type="text" maxlength="20" placeholder="친구 아이디" autocomplete="off" />
+          <button class="btn btn--primary" type="submit">요청</button>
+        </form>
+        <p id="friends-error" class="form-error" role="alert"></p>
+
+        <section class="settings-section">
+          <h4>받은 요청 <span id="incoming-count"></span></h4>
+          <div id="incoming-list" class="settings-list"></div>
+        </section>
+
+        <section class="settings-section">
+          <h4>보낸 요청 <span id="outgoing-count"></span></h4>
+          <div id="outgoing-list" class="settings-list"></div>
+        </section>
+
+        <section class="settings-section">
+          <h4>내 친구 <span id="friend-count"></span></h4>
+          <div id="friend-list" class="settings-list"></div>
+        </section>
+
+        <div class="dialog__actions">
+          <button id="close-friends-btn" class="btn btn--ghost" type="button">닫기</button>
+        </div>
+      </div>
+    </dialog>
+
+    <!-- 코드로 입장 -->
+    <dialog id="join-dialog" class="dialog">
+      <form id="join-form" class="dialog__form" novalidate>
+        <h3>코드로 입장</h3>
+        <p class="dialog__lead">방장에게 받은 방 코드를 입력하세요.</p>
+
+        <label class="field">
+          <span class="field__label">방 코드</span>
+          <input
+            id="join-code"
+            type="text"
+            maxlength="12"
+            placeholder="예: K7F2QD"
+            autocomplete="off"
+            autocapitalize="characters"
+            spellcheck="false"
+            required
+          />
+        </label>
+
+        <p id="join-error" class="form-error" role="alert"></p>
+
+        <div class="dialog__actions">
+          <button id="close-join-btn" class="btn btn--ghost" type="button">취소</button>
+          <button class="btn btn--primary" type="submit">입장</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- 채널 만들기 -->
+    <dialog id="channel-dialog" class="dialog">
+      <form id="channel-form" class="dialog__form" novalidate>
+        <h3>새 채널</h3>
+        <p class="dialog__lead">서버 안에서 주제별로 대화를 나눠 보세요.</p>
+
+        <label class="field">
+          <span class="field__label">채널 이름</span>
+          <input id="channel-name" type="text" maxlength="20" placeholder="예: 잡담" required />
+        </label>
+
+        <p id="channel-error" class="form-error" role="alert"></p>
+
+        <div class="dialog__actions">
+          <button id="cancel-channel-btn" class="btn btn--ghost" type="button">취소</button>
+          <button class="btn btn--primary" type="submit">만들기</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- 확인 다이얼로그 -->
+    <dialog id="confirm-dialog" class="dialog">
+      <div class="dialog__form">
+        <h3 id="confirm-title">확인</h3>
+        <p class="dialog__lead" id="confirm-text"></p>
+        <div class="dialog__actions">
+          <button id="confirm-cancel" class="btn btn--ghost" type="button">취소</button>
+          <button id="confirm-ok" class="btn btn--danger" type="button">확인</button>
+        </div>
+      </div>
+    </dialog>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

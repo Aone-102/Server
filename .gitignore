@@ -1,0 +1,10 @@
+node_modules/
+data/
+.wrangler/
+*.log
+*.pid
+.server.pid
+.reset-token
+.env
+.env.*
+.DS_Store

@@ -1,0 +1,19 @@
+{
+  "name": "linkchat",
+  "version": "0.2.0",
+  "private": true,
+  "description": "링크 하나로 누구나 들어오는 오픈 채팅 (Cloudflare Workers)",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "wrangler dev -c wrangler.jsonc --ip 0.0.0.0 --port 3000",
+    "realtime": "wrangler dev -c freebuff-realtime/wrangler.jsonc --local --ip 127.0.0.1 --inspector-port 9230",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "4.148.0",
+    "ws": "^8.18.0"
+  }
+}

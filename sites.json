@@ -1,0 +1,17 @@
+{
+  "siteId": "3f7a9c21-58d4-4b6e-9f02-7c1d5e8a4b63",
+  "name": "링크챗",
+  "environments": {
+    "production": {
+      "url": "https://site-c2acfaafd335463a81437c5c3557d549.freebuff.page",
+      "published": true,
+      "bindings": ["DB (D1)", "REALTIME"]
+    },
+    "preview": {
+      "url": "https://site-e017d592e28b441684b169ea96dc5d7c.freebuff.page",
+      "published": true,
+      "bindings": ["DB (D1)", "REALTIME"]
+    }
+  },
+  "manifest": "deploy.manifest.json"
+}
